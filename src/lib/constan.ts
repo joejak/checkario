@@ -29,10 +29,12 @@ export interface Space {
     y: number
     z: number
     id: number
+    owner: number
     occupant: null | {
       id: number
       team: Team
       strength: number
+      moved: boolean
     }
 }
 
@@ -77,6 +79,7 @@ export const betterCCB = (): Board => {
               y: k,
               z: l,
               id: overall++,
+              owner: -1,
               occupant: null,
             });
   }

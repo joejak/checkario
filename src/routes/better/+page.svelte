@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { betterCCB, type Space } from "$lib/constan";
+  import { betterCCB, type Space, type Team } from "$lib/constan";
   import { onMount } from "svelte";
 
   let showDebugInfo = $state(false);
@@ -11,13 +11,20 @@
   let viewerH = $state(1080);
   let viewerW = $state(1920);
   let defaultSpaceColor = "white";
-  let colorMap: { id: number; bgcolor: string; color: string }[] = $state([]);
+  let colorMap: {
+    id: number;
+    bgcolor: string;
+    color: string;
+    owner: number;
+  }[] = $state([]);
   let selected: null | Space = $state(null);
   let hovered: null | Space = $state(null);
   let jumpStart: null | HTMLElement = $state(null);
   let dropTarget: null | HTMLElement = $state(null);
   let range = $state(1);
   let playerCount = $state(2);
+  let currentPlayer: null | Team = $state(null);
+  let activePlayers: Team[] = $state([]);
 
   function getProjection(cell: {
     id: number;
@@ -81,7 +88,12 @@
       viewerW = viewerW - scalar;
       scalar = Math.max(Math.min(...[viewerH, viewerW]) / 8, minScalar);
     });
-    const homeSpaces: { id: number; bgcolor: string; color: string }[] = [];
+    const homeSpaces: {
+      id: number;
+      bgcolor: string;
+      color: string;
+      owner: number;
+    }[] = [];
 
     for (const team of Array.from(board.teams)) {
       team[1].homeSpaces.map((cell) => {
@@ -89,9 +101,12 @@
           id: cell,
           color: team[1].color,
           bgcolor: team[1].bgcolor,
+          owner: team[1].id,
         });
       });
     }
+
+    console.log(homeSpaces);
 
     for (const spaces of board.spaces) {
       if (
@@ -103,13 +118,30 @@
           id: spaces.id,
           bgcolor: defaultSpaceColor,
           color: "white",
+          owner: -1,
         });
       }
     }
     colorMap = homeSpaces;
+
+    console.log(board.spaces);
+    console.log(homeSpaces);
+
+    for (const cell of board.spaces) {
+      for (const space of homeSpaces) {
+        if (space.id == cell.id) {
+          console.log(cell.id, " -> ", cell.owner);
+          cell.owner = space.owner;
+          break;
+        }
+      }
+    }
   });
 
   function resetBoard(numPlayers: number) {
+    activePlayers = [];
+    dice = [];
+    currentPlayer = null;
     for (const space of board.spaces) {
       space.occupant = null;
     }
@@ -135,16 +167,122 @@
 
     for (const player of set) {
       let team = board.teams.get(player);
-      for (const space of board.spaces) {
-        if (team?.homeSpaces.includes(space.id)) {
-          space.occupant = {
-            id: space.id,
-            strength: Math.floor(Math.random() * 5) + 1,
-            team: team,
-          };
+      if (team) {
+        for (const space of board.spaces) {
+          if (team.homeSpaces.includes(space.id)) {
+            space.occupant = {
+              id: space.id,
+              strength: 1,
+              team: team,
+              moved: false,
+            };
+          }
+        }
+        activePlayers.push(team);
+      }
+    }
+    determinePlayerOrder();
+  }
+
+  let dice: { die: number; player: Team }[] = $state([]);
+  let rollerDelay = 50;
+  function determinePlayerOrder() {
+    dice = [];
+    if (activePlayers) {
+      for (const player of activePlayers) {
+        dice.push({ die: 6, player: player });
+      }
+      handleRoll(rollerDelay);
+    }
+  }
+
+  let rolling = $state(false);
+
+  function handleRoll(rollerDelay: number) {
+    rolling = true;
+    for (let i = 0; i < dice.length; i++) {
+      dice[i].die = Math.floor(Math.random() * 5) + 1;
+    }
+
+    rollerDelay += rollerDelay * 0.2;
+    if (rollerDelay > 1000) rollerDelay = 900;
+    if (rollerDelay > 800 && dice.length > 1) {
+      const sorted = dice.toSorted((a, b) => {
+        return b.die - a.die;
+      });
+      if (sorted[0].die != sorted[1].die) {
+        currentPlayer = sorted[0].player;
+        return;
+      }
+    }
+    setTimeout(() => {
+      handleRoll(rollerDelay);
+    }, rollerDelay);
+  }
+
+  let gameRunning = $state(false);
+  function startGame() {
+    rolling = false;
+    gameRunning = true;
+    console.log("start game");
+  }
+
+  function nextTurn() {
+    for (const cell of board.spaces) {
+      if (cell.occupant) {
+        if (cell.occupant.team.id == currentPlayer?.id) {
+          if (!cell.occupant.moved) cell.occupant.strength++;
+        }
+      }
+      if (cell.occupant) cell.occupant.moved = false;
+    }
+
+    let nextindex = currentPlayer ? currentPlayer.id % activePlayers.length : 0;
+    currentPlayer = activePlayers[nextindex];
+
+    if (nextindex == 0) {
+      nextRound();
+    }
+  }
+
+  function nextRound() {
+    console.log("new round!");
+    for (const cell of board.spaces) {
+      if (cell.owner == -1) {
+        if (!cell.occupant || cell.occupant.id == -1) {
+          if (Math.random()*32 < Math.max(Math.abs(cell.x), Math.abs(cell.y), Math.abs(cell.z))) {
+            if (cell.occupant && cell.occupant.id == -1) {
+              cell.occupant.strength++;
+            } else {
+              cell.occupant = {
+                id: -1,
+                moved: false,
+                strength: 1,
+                team: {
+                  bgcolor: "white",
+                  color: "black",
+                  homeSpaces: [],
+                  id: -1,
+                },
+              };
+            }
+          } 
         }
       }
     }
+  }
+
+  function getTeamStrength(id: number) {
+    let totStr = 0;
+    let pieces = 0;
+    for (const cell of board.spaces) {
+      let occ = cell.occupant;
+      if (occ && occ.team && occ.team.id == id) {
+        totStr += occ.strength;
+        pieces++;
+      }
+    }
+    return { totalP: totStr, pieces: pieces };
   }
 
   function isNeighbor(cell1: Space, cell2: Space) {
@@ -229,10 +367,7 @@
         if (dropTarget != e.currentTarget) {
           dropTarget = e.currentTarget;
         }
-      } else if (
-        cell.occupant &&
-        cell.occupant.team.id != selected.occupant!.team.id
-      ) {
+      } else if (cell.occupant) {
         hovered = cell;
         e.preventDefault();
         if (dropTarget != e.currentTarget) {
@@ -242,25 +377,6 @@
     }
   }
 
-  function extractNums(elem: HTMLElement) {
-    return {
-      left: parseFloat(elem.computedStyleMap().get("left")?.toString() ?? "0"),
-      top: parseFloat(elem.computedStyleMap().get("top")?.toString() ?? "0"),
-      centerX:
-        parseFloat(elem.computedStyleMap().get("left")?.toString() ?? "0") +
-        parseFloat(elem.computedStyleMap().get("width")?.toString() ?? "0"),
-      centerY:
-        parseFloat(elem.computedStyleMap().get("top")?.toString() ?? "0") +
-        parseFloat(elem.computedStyleMap().get("height")?.toString() ?? "0"),
-      width: parseFloat(
-        elem.computedStyleMap().get("width")?.toString() ?? "0"
-      ),
-      height: parseFloat(
-        elem.computedStyleMap().get("height")?.toString() ?? "0"
-      ),
-    };
-  }
-
   async function handleDropEvent(e: DragEvent, cell: Space) {
     console.log("dropp occured on cell: ", JSON.stringify(cell));
     if (selected && selected.occupant) {
@@ -268,9 +384,17 @@
         selected.occupant.strength - calcJumpEnergy(selected, cell);
       selected.occupant.strength =
         selected.occupant.strength < 2 ? 1 : selected.occupant.strength;
+      if (
+        cell.occupant?.team.id == selected.occupant.team.id ||
+        cell.occupant?.team.id == -1
+      ) {
+        selected.occupant.strength += cell.occupant.strength;
+      }
       cell.occupant = selected.occupant;
+      cell.occupant.moved = true;
       selected.occupant = null;
       selected = null;
+      hovered = null;
     }
   }
 
@@ -280,108 +404,277 @@
     let zn = Math.abs(start.z - end.z);
     let tot = Math.max(xn, yn, zn);
     console.log(xn, yn, zn, tot);
-    return tot;
+    return tot - 1;
   }
+
+  let battling = $state(false);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  style="display:flex; flex-direction:column; justify-content:center; margin-left: 10vw; width: 15vw; color: lightsteelblue;
+  style="display:flex; flex-direction:row; margin-left: 10vw; margin-right: 10vw; height:100vh; align-items:center; color: lightsteelblue;
     font-family: monospace;
     font-size: x-large;"
 >
-  <span
-    ><label>Debug Mode: </label><input
-      type="checkbox"
-      bind:checked={showDebugInfo}
-    /></span
-  >
-  <span><label>Range</label> <span style="float:right;"> {range}</span></span>
-  <input
-    type="range"
-    name=""
-    id=""
-    min="1"
-    defaultValue="1"
-    max="5"
-    onmousemove={(e) => {
-      handleRangeChange(e);
-    }}
-    onchange={(e) => {
-      handleRangeChange(e);
-    }}
-  />
+  <div style="align-self:start; margin: 1rem;">
+    <span
+      ><label>Debug Mode: </label><input
+        type="checkbox"
+        bind:checked={showDebugInfo}
+      /></span
+    >
+    <span><label>Range</label> <span style="float:right;"> {range}</span></span>
+    <input
+      type="range"
+      name=""
+      id=""
+      min="1"
+      defaultValue="1"
+      max="5"
+      onmousemove={(e) => {
+        handleRangeChange(e);
+      }}
+      onchange={(e) => {
+        handleRangeChange(e);
+      }}
+    />
 
-  <form>
-    <fieldset>
-      <legend>number of players</legend>
-      <div>
-        <input
-          name="numberOfPlayers"
-          onclick={() => {
-            playerCount = 1;
-          }}
-          value="1"
-          type="radio"
-        />
-        <label> 1 player</label>
-      </div>
-      <div>
-        <input
-          name="numberOfPlayers"
-          onclick={() => {
-            playerCount = 2;
-          }}
-          value="2"
-          type="radio"
-          checked
-        />
-        <label> 2 player</label>
-      </div>
-      <div>
-        <input
-          name="numberOfPlayers"
-          onclick={() => {
-            playerCount = 3;
-          }}
-          value="3"
-          type="radio"
-        />
-        <label> 3 player</label>
-      </div>
-      <div>
-        <input
-          name="numberOfPlayers"
-          onclick={() => {
-            playerCount = 4;
-          }}
-          value="4"
-          type="radio"
-        />
-        <label> 4 player</label>
-      </div>
-      <div>
-        <input
-          name="numberOfPlayers"
-          onclick={() => {
-            playerCount = 6;
-          }}
-          value="6"
-          type="radio"
-        />
-        <label> 6 player</label>
-      </div>
-    </fieldset>
-  </form>
+    <form>
+      <fieldset>
+        <legend>number of players</legend>
+        <div>
+          <input
+            name="numberOfPlayers"
+            onclick={() => {
+              playerCount = 1;
+            }}
+            value="1"
+            type="radio"
+          />
+          <label> 1 player</label>
+        </div>
+        <div>
+          <input
+            name="numberOfPlayers"
+            onclick={() => {
+              playerCount = 2;
+            }}
+            value="2"
+            type="radio"
+            checked
+          />
+          <label> 2 player</label>
+        </div>
+        <div>
+          <input
+            name="numberOfPlayers"
+            onclick={() => {
+              playerCount = 3;
+            }}
+            value="3"
+            type="radio"
+          />
+          <label> 3 player</label>
+        </div>
+        <div>
+          <input
+            name="numberOfPlayers"
+            onclick={() => {
+              playerCount = 4;
+            }}
+            value="4"
+            type="radio"
+          />
+          <label> 4 player</label>
+        </div>
+        <div>
+          <input
+            name="numberOfPlayers"
+            onclick={() => {
+              playerCount = 6;
+            }}
+            value="6"
+            type="radio"
+          />
+          <label> 6 player</label>
+        </div>
+      </fieldset>
+    </form>
 
-  <button
-    type="button"
-    onclick={() => {
-      resetBoard(playerCount);
+    <button
+      type="button"
+      onclick={() => {
+        resetBoard(playerCount);
+      }}
+    >
+      Reset
+    </button>
+  </div>
+  {#if gameRunning && currentPlayer}
+    <div style="margin-left: auto;">
+      <fieldset style="border-color:white;">
+        <legend>turn order</legend>
+        {#each activePlayers as player, index}
+          <div
+            style="height: 120px; width: 250px; background-color: {player.bgcolor}; {currentPlayer.id ==
+            player.id
+              ? 'border: solid thick aqua;'
+              : 'border: solid thick transparent;'}
+            display: flex; padding: .5rem;"
+          >
+            <fieldset
+              style="color:{player.color}; border-color:{player.color};  width: 100%;"
+            >
+              <legend>player <span>{index}</span></legend>
+              <table style="width: 100%;">
+                <tbody>
+                  <tr>
+                    <th>total strength</th>
+                    <td>{getTeamStrength(player.id).totalP}</td>
+                  </tr>
+                  <tr>
+                    <th>pieces</th>
+                    <td>{getTeamStrength(player.id).pieces}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </fieldset>
+            {#if player.id == currentPlayer.id}
+              <svg
+                style="position: absolute;
+                      transform: scale(.5, .5) translate(500px, -50px);"
+                width="156.26584"
+                height="180.37102"
+                viewBox="0 0 41.345337 47.723165"
+                version="1.1"
+                id="svg3330"
+              >
+                <defs id="defs3327" />
+                <g id="layer1" transform="translate(-15.700967,-104.65386)">
+                  <path
+                    style="fill:{player.bgcolor};fill-opacity:0;stroke:{player.bgcolor};stroke-width:2.64583;stroke-linecap:round;stroke-linejoin:round"
+                    d="m 55.723387,105.97668 -38.699636,21.72701 38.673324,23.35052 z"
+                    id="path3451"
+                  />
+                  <path
+                    style="fill:{player.bgcolor};fill-opacity:0;stroke:{player.bgcolor};stroke-width:2.64583;stroke-linecap:round;stroke-linejoin:round"
+                    d="M 55.452532,116.11052 35.71519,127.67819 55.235637,141.05331 Z"
+                    id="path3453"
+                  />
+                </g>
+              </svg>
+            {/if}
+          </div>
+        {/each}
+      </fieldset>
+
+      <button
+        onclick={() => {
+          nextTurn();
+        }}>End Turn</button
+      >
+    </div>
+  {/if}
+  {#if rolling}
+    <div
+      class="useopenin"
+      style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1;  height: 300px; width: 0px; border: solid white; border-radius: 50px; background: {document
+        .getElementsByTagName('body')
+        .item(0)?.style
+        .backgroundColor}; transistion: all 1s ease-out; display: flex; flex-direction:column;
+    justify-content: space-evenly;
+    align-items: center;"
+      onanimationend={(e) => {
+        e.currentTarget.style.width = "800px";
+      }}
+    >
+      <div
+        style="width:100%; flex-grow: 1; display:flex;   justify-content: space-evenly;
+    align-items: center;"
+      >
+        {#each dice as die}
+          <div
+            class="{!currentPlayer ? 'rolling' : ''} "
+            style="width: 50px; height: 50px; background-color:{activePlayers
+              ? die.player.bgcolor
+              : 'transparent'}; color:{activePlayers
+              ? die.player.color
+              : 'white'};
+                border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: xxx-large;
+            {currentPlayer != null && currentPlayer == die.player
+              ? 'transform: scale(1.5,1.5); border:solid aqua thick;'
+              : ''}
+            transition: all 500ms;"
+          >
+            {die.die}
+          </div>
+        {/each}
+      </div>
+      {#if currentPlayer}
+        <button
+          style="font-size: xxx-large; margin: 1rem;"
+          onclick={() => {
+            startGame();
+          }}>Start Game</button
+        >
+      {/if}
+    </div>
+  {/if}
+
+  {#if battling}
+  <div
+    class="useopenin"
+    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1;  height: 300px; width: 0px; border: solid white; border-radius: 50px; background: {document
+      .getElementsByTagName('body')
+      .item(0)?.style
+      .backgroundColor}; transistion: all 1s ease-out; display: flex; flex-direction:column;
+  justify-content: space-evenly;
+  align-items: center;"
+    onanimationend={(e) => {
+      e.currentTarget.style.width = "800px";
     }}
   >
-    Reset
-  </button>
+    <div
+      style="width:100%; flex-grow: 1; display:flex;   justify-content: space-evenly;
+  align-items: center;"
+    >
+      {#each dice as die}
+        <div
+          class="{!currentPlayer ? 'rolling' : ''} "
+          style="width: 50px; height: 50px; background-color:{activePlayers
+            ? die.player.bgcolor
+            : 'transparent'}; color:{activePlayers
+            ? die.player.color
+            : 'white'};
+              border-radius: 6px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          font-size: xxx-large;
+          {currentPlayer != null && currentPlayer == die.player
+            ? 'transform: scale(1.5,1.5); border:solid aqua thick;'
+            : ''}
+          transition: all 500ms;"
+        >
+          {die.die}
+        </div>
+      {/each}
+    </div>
+    {#if currentPlayer}
+      <button
+        style="font-size: xxx-large; margin: 1rem;"
+        onclick={() => {
+          startGame();
+        }}>Start Game</button
+      >
+    {/if}
+  </div>
+{/if}
+
   {#each board.spaces as cell}
     <button
       style="
@@ -406,7 +699,7 @@
           : 'border: solid; border-color:aqua; border-width: .25rem;'
         : 'border: solid; border-color:black; border-width: .25rem;'}
         {selected && selected.id == cell.id
-        ? 'outline: .25rem dashed aqua;'
+        ? 'outline: dotted .25rem aqua;'
         : ''}
         {!selected
         ? 'border: solid; border-color:black; border-width: .25rem;'
@@ -421,16 +714,22 @@
       ondragleave={(e) => handleDragLeave(e, cell)}
       ondrop={(e) => handleDropEvent(e, cell)}
       onmousedown={(e) => {
-        e.stopPropagation();
-        if (e.button > 1) {
-          selected = null;
-          jumpStart = null;
-        } else if (selected && selected.id == cell.id) {
-          selected = null;
-          jumpStart = null;
-        } else {
-          selected = cell;
-          jumpStart = e.currentTarget;
+        if (
+          cell.occupant &&
+          cell.occupant.team.id == (currentPlayer ? currentPlayer.id : true) &&
+          !cell.occupant.moved
+        ) {
+          e.stopPropagation();
+          if (e.button > 1) {
+            selected = null;
+            jumpStart = null;
+          } else if (selected && selected.id == cell.id) {
+            selected = null;
+            jumpStart = null;
+          } else {
+            selected = cell;
+            jumpStart = e.currentTarget;
+          }
         }
       }}
     >
@@ -444,7 +743,9 @@
             height: {scalar / 3}px; 
             width: {scalar / 3}px; 
             border-radius: {scalar}px;
-            background-color:{cell.occupant.team.bgcolor};
+            background-color:{cell.occupant.moved
+              ? `color(from ${cell.occupant.team.bgcolor} srgb r g b /.5 )`
+              : cell.occupant.team.bgcolor};
             color: {cell.occupant.team.color};
             border: solid thick {cell.occupant.team.color};
             display:flex; justify-content:center; align-items:center;
@@ -454,7 +755,11 @@
               ? 'border-color:aqua;'
               : ''}
             "
-            draggable="true"
+            draggable={(currentPlayer && currentPlayer.id
+              ? currentPlayer.id == cell.occupant.team.id
+              : true) && !cell.occupant.moved
+              ? "true"
+              : "false"}
             ondragstart={(e) => {
               handleDragStart(e);
             }}
@@ -471,7 +776,7 @@
               return c.id == cell.id;
             })?.color}; margin:1px; padding: 0px;"
           >
-            {cell.id}
+            {cell.id} | ownd: {cell.owner}
           </p>
           <pre
             style="color:{colorMap.find((c) => {
@@ -491,24 +796,56 @@
   }
 
   .jumpend {
-    animation: pulse 300ms infinite alternate;
+    outline-style: dotted;
+    animation: pulse 150ms infinite alternate;
+  }
+
+  .rolling {
+    animation: jiggle 90ms ease-out infinite alternate;
+  }
+  .useopenin {
+    animation: openin 300ms;
+  }
+
+  th {
+    text-align: left;
+  }
+  @keyframes jiggle {
+    from {
+      transform: rotate(5deg);
+    }
+    to {
+      transform: rotate(-5deg);
+    }
+  }
+
+  @keyframes openin {
+    from {
+      width: 0px;
+    }
+    to {
+      width: 800px;
+    }
   }
 
   @keyframes spin {
     from {
-      rotate: (0deg);
+      rotate: (5deg);
     }
     to {
-      rotate: (360deg);
+      rotate: (-5deg);
     }
   }
 
   @keyframes pulse {
     from {
       outline-offset: 0px;
+
+      transform: rotate(-5deg);
     }
     to {
-      outline-offset: 10px;
+      outline-offset: 6px;
+      transform: rotate(5deg);
     }
   }
 </style>
