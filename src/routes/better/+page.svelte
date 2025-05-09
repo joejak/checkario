@@ -197,7 +197,7 @@
   }
 
   let rolling = $state(false);
-
+  let startingPlayer: null | Team = $state(null);
   function handleRoll(rollerDelay: number) {
     rolling = true;
     for (let i = 0; i < dice.length; i++) {
@@ -212,6 +212,7 @@
       });
       if (sorted[0].die != sorted[1].die) {
         currentPlayer = sorted[0].player;
+        startingPlayer = currentPlayer;
         return;
       }
     }
@@ -250,7 +251,10 @@
     for (const cell of board.spaces) {
       if (cell.owner == -1) {
         if (!cell.occupant || cell.occupant.id == -1) {
-          if (Math.random()*32 < Math.max(Math.abs(cell.x), Math.abs(cell.y), Math.abs(cell.z))) {
+          if (
+            Math.random() * 32 <
+            Math.max(Math.abs(cell.x), Math.abs(cell.y), Math.abs(cell.z))
+          ) {
             if (cell.occupant && cell.occupant.id == -1) {
               cell.occupant.strength++;
             } else {
@@ -266,7 +270,7 @@
                 },
               };
             }
-          } 
+          }
         }
       }
     }
@@ -395,6 +399,7 @@
       selected.occupant = null;
       selected = null;
       hovered = null;
+      nextTurn();
     }
   }
 
@@ -412,11 +417,11 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  style="display:flex; flex-direction:row; margin-left: 10vw; margin-right: 10vw; height:100vh; align-items:center; color: lightsteelblue;
+  style="display:flex; flex-direction:row; margin-left: 50px; margin-right: 50px; height:100vh; align-items:center; color: lightsteelblue;
     font-family: monospace;
     font-size: x-large;"
 >
-  <div style="align-self:start; margin: 1rem;">
+  <div style="align-self:start; margin: 1rem; max-width: 250px;">
     <span
       ><label>Debug Mode: </label><input
         type="checkbox"
@@ -515,18 +520,26 @@
       <fieldset style="border-color:white;">
         <legend>turn order</legend>
         {#each activePlayers as player, index}
+          {#if startingPlayer && player.id == startingPlayer.id}
+            <div
+              style="height: 10px; width: 12vw; max-width: 250px; background-color: #ffffff99; border: solid thick transparent; display: flex; justify-content: center; align-items: center;"
+            >
+              <p style="font-size: medium; color: black; margin: 0px; padding: 0px; width:%100; "><em>end of round</em></p>
+            </div>
+          {/if}
           <div
-            style="height: 120px; width: 250px; background-color: {player.bgcolor}; {currentPlayer.id ==
+            style="height: 10vh; width: 12vw; max-width: 250px; background-color: {player.bgcolor}; {currentPlayer.id ==
             player.id
               ? 'border: solid thick aqua;'
               : 'border: solid thick transparent;'}
-            display: flex; padding: .5rem;"
+            display: flex; padding: .5rem;
+            font-size: medium;"
           >
             <fieldset
               style="color:{player.color}; border-color:{player.color};  width: 100%;"
             >
               <legend>player <span>{index}</span></legend>
-              <table style="width: 100%;">
+              <table style="width: 100%; ">
                 <tbody>
                   <tr>
                     <th>total strength</th>
@@ -626,54 +639,54 @@
   {/if}
 
   {#if battling}
-  <div
-    class="useopenin"
-    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1;  height: 300px; width: 0px; border: solid white; border-radius: 50px; background: {document
-      .getElementsByTagName('body')
-      .item(0)?.style
-      .backgroundColor}; transistion: all 1s ease-out; display: flex; flex-direction:column;
+    <div
+      class="useopenin"
+      style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1;  height: 300px; width: 0px; border: solid white; border-radius: 50px; background: {document
+        .getElementsByTagName('body')
+        .item(0)?.style
+        .backgroundColor}; transistion: all 1s ease-out; display: flex; flex-direction:column;
   justify-content: space-evenly;
   align-items: center;"
-    onanimationend={(e) => {
-      e.currentTarget.style.width = "800px";
-    }}
-  >
-    <div
-      style="width:100%; flex-grow: 1; display:flex;   justify-content: space-evenly;
-  align-items: center;"
+      onanimationend={(e) => {
+        e.currentTarget.style.width = "800px";
+      }}
     >
-      {#each dice as die}
-        <div
-          class="{!currentPlayer ? 'rolling' : ''} "
-          style="width: 50px; height: 50px; background-color:{activePlayers
-            ? die.player.bgcolor
-            : 'transparent'}; color:{activePlayers
-            ? die.player.color
-            : 'white'};
+      <div
+        style="width:100%; flex-grow: 1; display:flex;   justify-content: space-evenly;
+  align-items: center;"
+      >
+        {#each dice as die}
+          <div
+            class="{!currentPlayer ? 'rolling' : ''} "
+            style="width: 50px; height: 50px; background-color:{activePlayers
+              ? die.player.bgcolor
+              : 'transparent'}; color:{activePlayers
+              ? die.player.color
+              : 'white'};
               border-radius: 6px;
           display: flex;
           justify-content: center;
           align-items: center;
           font-size: xxx-large;
           {currentPlayer != null && currentPlayer == die.player
-            ? 'transform: scale(1.5,1.5); border:solid aqua thick;'
-            : ''}
+              ? 'transform: scale(1.5,1.5); border:solid aqua thick;'
+              : ''}
           transition: all 500ms;"
+          >
+            {die.die}
+          </div>
+        {/each}
+      </div>
+      {#if currentPlayer}
+        <button
+          style="font-size: xxx-large; margin: 1rem;"
+          onclick={() => {
+            startGame();
+          }}>Start Game</button
         >
-          {die.die}
-        </div>
-      {/each}
+      {/if}
     </div>
-    {#if currentPlayer}
-      <button
-        style="font-size: xxx-large; margin: 1rem;"
-        onclick={() => {
-          startGame();
-        }}>Start Game</button
-      >
-    {/if}
-  </div>
-{/if}
+  {/if}
 
   {#each board.spaces as cell}
     <button
