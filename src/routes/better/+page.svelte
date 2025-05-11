@@ -33,7 +33,10 @@
     z: number;
   }) {
     return {
-      w: viewerW / 2 + (scalar / 3) * (cell.x - cell.y / 2 - cell.z / 2),
+      w:
+        (viewerW > 500 && viewerW > viewerH ? scalar * 1.5 : scalar / 10) +
+        (scalar / 2) * 8 +
+        (scalar / 3) * (cell.x - cell.y / 2 - cell.z / 2),
       h: viewerH / 2 + ((scalar / 3) * (cell.y - cell.z) * Math.sqrt(3)) / 2,
     };
   }
@@ -41,35 +44,8 @@
   onMount(() => {
     const body = document.body;
     const html = document.documentElement;
-    console.log(board);
-    viewerH = Math.max(
-      body.scrollHeight,
-      body.offsetHeight,
-      html.clientHeight,
-      html.scrollHeight,
-      html.offsetHeight
-    );
-    viewerW = Math.max(
-      body.scrollWidth,
-      body.offsetWidth,
-      html.clientWidth,
-      html.scrollWidth,
-      html.offsetWidth
-    );
-    viewerH = viewerH - scalar;
-    viewerW = viewerW - scalar;
-    scalar = Math.max(Math.min(...[viewerH, viewerW]) / 8, minScalar);
-    window.addEventListener("mousedown", (e) => {
-      selected = null;
-    });
-    window.addEventListener("mouseup", (e) => {
-      selected = null;
-      dropTarget = null;
-    });
-    window.addEventListener("contextmenu", (e) => {
-      handleRightClick(e);
-    });
-    window.addEventListener("resize", () => {
+
+    const resize = () => {
       viewerH = Math.max(
         body.scrollHeight,
         body.offsetHeight,
@@ -87,13 +63,29 @@
       viewerH = viewerH - scalar;
       viewerW = viewerW - scalar;
       scalar = Math.max(Math.min(...[viewerH, viewerW]) / 8, minScalar);
+    };
+    console.log(board);
+    viewerH = viewerH - scalar;
+    viewerW = viewerW - scalar;
+    scalar = Math.max(Math.min(...[viewerH, viewerW]) / 8, minScalar);
+    window.addEventListener("mousedown", (e) => {
+      selected = null;
     });
+    window.addEventListener("mouseup", (e) => {
+      selected = null;
+      dropTarget = null;
+    });
+    window.addEventListener("contextmenu", (e) => {
+      handleRightClick(e);
+    });
+    window.addEventListener("resize", resize);
     const homeSpaces: {
       id: number;
       bgcolor: string;
       color: string;
       owner: number;
     }[] = [];
+    window.addEventListener("DOMContentLoaded", resize);
 
     for (const team of Array.from(board.teams)) {
       team[1].homeSpaces.map((cell) => {
@@ -136,6 +128,8 @@
         }
       }
     }
+
+    resize();
   });
 
   function resetBoard(numPlayers: number) {
@@ -229,20 +223,35 @@
   }
 
   function nextTurn() {
-    for (const cell of board.spaces) {
-      if (cell.occupant) {
-        if (cell.occupant.team.id == currentPlayer?.id) {
-          if (!cell.occupant.moved) cell.occupant.strength++;
-        }
+    pieceMoved = false;
+    let remaining = 0;
+    for (const team of activePlayers) {
+      if (getTeamStrength(team.id).pieces > 0) {
+        remaining++;
       }
+    }
+
+    if (!(remaining > 1)) {
+      endGame();
+      return;
+    }
+
+    for (const cell of board.spaces) {
       if (cell.occupant) cell.occupant.moved = false;
     }
 
     let nextindex = currentPlayer ? currentPlayer.id % activePlayers.length : 0;
     currentPlayer = activePlayers[nextindex];
 
-    if (nextindex == 0) {
+    if (!startingPlayer)
+      throw new Error(
+        "starting player null on next turn, shouldn't be possible."
+      );
+    if (startingPlayer.id == activePlayers[nextindex].id) {
       nextRound();
+    }
+    if (getTeamStrength(activePlayers[nextindex].id).totalP < 1) {
+      nextTurn();
     }
   }
 
@@ -252,8 +261,11 @@
       if (cell.owner == -1) {
         if (!cell.occupant || cell.occupant.id == -1) {
           if (
-            Math.random() * 32 <
-            Math.max(Math.abs(cell.x), Math.abs(cell.y), Math.abs(cell.z))
+            Math.random() * 128 <
+            6 -
+              Math.abs(cell.x) +
+              (6 - Math.abs(cell.y)) +
+              (6 - Math.abs(cell.z))
           ) {
             if (cell.occupant && cell.occupant.id == -1) {
               cell.occupant.strength++;
@@ -273,6 +285,24 @@
           }
         }
       }
+    }
+  }
+
+  function endGame() {
+    const survivors = activePlayers.filter((ap) => {
+      return getTeamStrength(ap.id).pieces > 0;
+    });
+    console.log(survivors);
+    if (survivors.length > 0) {
+      const winner = survivors[0];
+      alert(`Game Over! ${winner.bgcolor} team wins!`);
+      return;
+    } else {
+      alert(`Game Over! DRAW!`);
+    }
+
+    for (const cell of board.spaces) {
+      cell.occupant = null;
     }
   }
 
@@ -381,24 +411,54 @@
     }
   }
 
+  let pieceMoved = $state(false);
+
   async function handleDropEvent(e: DragEvent, cell: Space) {
-    console.log("dropp occured on cell: ", JSON.stringify(cell));
     if (selected && selected.occupant) {
+      selected.occupant.moved = true;
+      pieceMoved = true;
+      selected.occupant.team;
       selected.occupant.strength =
         selected.occupant.strength - calcJumpEnergy(selected, cell);
-      selected.occupant.strength =
-        selected.occupant.strength < 2 ? 1 : selected.occupant.strength;
-      if (
-        cell.occupant?.team.id == selected.occupant.team.id ||
-        cell.occupant?.team.id == -1
+      if (cell.occupant && cell.occupant.team.id != selected.occupant.team.id) {
+        //valid take (landed on enemy piece or neutral piece)
+        if (cell.occupant.team.id == -1) {
+          //neutral take
+          selected.occupant.strength += cell.occupant.strength;
+          cell.occupant = selected.occupant;
+          selected.occupant = null;
+          return;
+        } else {
+          //enemy take
+          if (selected.occupant.strength > cell.occupant.strength) {
+            //jumper is stronger
+            selected.occupant.strength -= cell.occupant.strength;
+            cell.occupant = selected.occupant;
+            selected.occupant = null;
+            return;
+          } else {
+            //enemy is stronger
+            cell.occupant.strength -= selected.occupant.strength;
+            selected.occupant = null;
+            if (cell.occupant.strength < 1) {
+              cell.occupant = null;
+            }
+            nextTurn();
+          }
+        }
+      } else if (
+        cell.occupant &&
+        cell.occupant.team.id == selected.occupant.team.id
       ) {
         selected.occupant.strength += cell.occupant.strength;
+        cell.occupant = selected.occupant;
+        selected.occupant = null;
+        return;
+      } else {
+        cell.occupant = selected.occupant;
+        selected.occupant = null;
       }
-      cell.occupant = selected.occupant;
-      cell.occupant.moved = true;
-      selected.occupant = null;
-      selected = null;
-      hovered = null;
+
       nextTurn();
     }
   }
@@ -413,6 +473,8 @@
   }
 
   let battling = $state(false);
+
+  let showSettings = $state(false);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -421,102 +483,118 @@
     font-family: monospace;
     font-size: x-large;"
 >
-  <div style="align-self:start; margin: 1rem; max-width: 250px;">
-    <span
-      ><label>Debug Mode: </label><input
-        type="checkbox"
-        bind:checked={showDebugInfo}
-      /></span
-    >
-    <span><label>Range</label> <span style="float:right;"> {range}</span></span>
-    <input
-      type="range"
-      name=""
-      id=""
-      min="1"
-      defaultValue="1"
-      max="5"
-      onmousemove={(e) => {
-        handleRangeChange(e);
-      }}
-      onchange={(e) => {
-        handleRangeChange(e);
-      }}
-    />
+  <fieldset
+    style="align-self:start; margin: 1rem; max-width: 250px; z-index: 1; background: black; {showSettings
+      ? ''
+      : 'height: 0px; width: 0px;'} contain: content; "
+  >
+    <legend>
+      <button
+        style="width: 130px; margin-top: 16px;"
+        onclick={() => {
+          showSettings = !showSettings;
+        }}>settings {!showSettings ? "△" : "▽"}</button
+      >
+    </legend>
+    <div style="padding-top: 15px;">
+      <span
+        ><label>Debug Mode: </label><input
+          type="checkbox"
+          bind:checked={showDebugInfo}
+        /></span
+      >
+      <span
+        ><label>Range</label> <span style="float:right;"> {range}</span></span
+      >
+      <input
+        type="range"
+        name=""
+        id=""
+        min="1"
+        defaultValue="1"
+        max="5"
+        onmousemove={(e) => {
+          handleRangeChange(e);
+        }}
+        onchange={(e) => {
+          handleRangeChange(e);
+        }}
+      />
 
-    <form>
-      <fieldset>
-        <legend>number of players</legend>
-        <div>
-          <input
-            name="numberOfPlayers"
-            onclick={() => {
-              playerCount = 1;
-            }}
-            value="1"
-            type="radio"
-          />
-          <label> 1 player</label>
-        </div>
-        <div>
-          <input
-            name="numberOfPlayers"
-            onclick={() => {
-              playerCount = 2;
-            }}
-            value="2"
-            type="radio"
-            checked
-          />
-          <label> 2 player</label>
-        </div>
-        <div>
-          <input
-            name="numberOfPlayers"
-            onclick={() => {
-              playerCount = 3;
-            }}
-            value="3"
-            type="radio"
-          />
-          <label> 3 player</label>
-        </div>
-        <div>
-          <input
-            name="numberOfPlayers"
-            onclick={() => {
-              playerCount = 4;
-            }}
-            value="4"
-            type="radio"
-          />
-          <label> 4 player</label>
-        </div>
-        <div>
-          <input
-            name="numberOfPlayers"
-            onclick={() => {
-              playerCount = 6;
-            }}
-            value="6"
-            type="radio"
-          />
-          <label> 6 player</label>
-        </div>
-      </fieldset>
-    </form>
+      <form>
+        <fieldset>
+          <legend>number of players</legend>
+          <div>
+            <input
+              name="numberOfPlayers"
+              onclick={() => {
+                playerCount = 1;
+              }}
+              value="1"
+              type="radio"
+            />
+            <label> 1 player</label>
+          </div>
+          <div>
+            <input
+              name="numberOfPlayers"
+              onclick={() => {
+                playerCount = 2;
+              }}
+              value="2"
+              type="radio"
+              checked
+            />
+            <label> 2 player</label>
+          </div>
+          <div>
+            <input
+              name="numberOfPlayers"
+              onclick={() => {
+                playerCount = 3;
+              }}
+              value="3"
+              type="radio"
+            />
+            <label> 3 player</label>
+          </div>
+          <div>
+            <input
+              name="numberOfPlayers"
+              onclick={() => {
+                playerCount = 4;
+              }}
+              value="4"
+              type="radio"
+            />
+            <label> 4 player</label>
+          </div>
+          <div>
+            <input
+              name="numberOfPlayers"
+              onclick={() => {
+                playerCount = 6;
+              }}
+              value="6"
+              type="radio"
+            />
+            <label> 6 player</label>
+          </div>
+        </fieldset>
+      </form>
 
-    <button
-      type="button"
-      onclick={() => {
-        resetBoard(playerCount);
-      }}
-    >
-      Reset
-    </button>
-  </div>
+      <button
+        type="button"
+        onclick={() => {
+          resetBoard(playerCount);
+        }}
+      >
+        Reset
+      </button>
+    </div>
+  </fieldset>
   {#if gameRunning && currentPlayer}
-    <div style="margin-left: auto;">
+    <div style="margin-left: {(scalar / 2) * 18}px;">
       <fieldset style="border-color:white;">
         <legend>turn order</legend>
         {#each activePlayers as player, index}
@@ -524,7 +602,11 @@
             <div
               style="height: 10px; width: 12vw; max-width: 250px; background-color: #ffffff99; border: solid thick transparent; display: flex; justify-content: center; align-items: center;"
             >
-              <p style="font-size: medium; color: black; margin: 0px; padding: 0px; width:%100; "><em>end of round</em></p>
+              <p
+                style="font-size: medium; color: black; margin: 0px; padding: 0px; width:%100; "
+              >
+                <em>end of round</em>
+              </p>
             </div>
           {/if}
           <div
@@ -730,7 +812,9 @@
         if (
           cell.occupant &&
           cell.occupant.team.id == (currentPlayer ? currentPlayer.id : true) &&
-          !cell.occupant.moved
+          pieceMoved
+            ? cell.occupant.moved
+            : true
         ) {
           e.stopPropagation();
           if (e.button > 1) {
@@ -756,7 +840,10 @@
             height: {scalar / 3}px; 
             width: {scalar / 3}px; 
             border-radius: {scalar}px;
-            background-color:{cell.occupant.moved
+            background-color:{currentPlayer &&
+            cell.occupant.team.id == currentPlayer.id &&
+            pieceMoved &&
+            !cell.occupant.moved
               ? `color(from ${cell.occupant.team.bgcolor} srgb r g b /.5 )`
               : cell.occupant.team.bgcolor};
             color: {cell.occupant.team.color};
@@ -770,7 +857,7 @@
             "
             draggable={(currentPlayer && currentPlayer.id
               ? currentPlayer.id == cell.occupant.team.id
-              : true) && !cell.occupant.moved
+              : true) && (pieceMoved ? cell.occupant.moved : true)
               ? "true"
               : "false"}
             ondragstart={(e) => {
