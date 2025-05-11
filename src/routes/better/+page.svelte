@@ -20,6 +20,7 @@
   let selected: null | Space = $state(null);
   let hovered: null | Space = $state(null);
   let jumpStart: null | HTMLElement = $state(null);
+  let dragElement: null | HTMLElement = $state(null);
   let dropTarget: null | HTMLElement = $state(null);
   let range = $state(1);
   let playerCount = $state(2);
@@ -261,7 +262,7 @@
       if (cell.owner == -1) {
         if (!cell.occupant || cell.occupant.id == -1) {
           if (
-            Math.random() * 128 <
+            Math.random() * 512 <
             6 -
               Math.abs(cell.x) +
               (6 - Math.abs(cell.y)) +
@@ -323,12 +324,9 @@
     let r = range;
     if (cell1 == cell2) return false;
     if (cell1 && cell1.occupant && cell1.occupant.strength) {
-      r = cell1.occupant.strength;
+      return calcJumpEnergy(cell1, cell2) < cell1.occupant.strength;
     }
-    let xn = Math.abs(cell1.x - cell2.x) < r + 1 ? 1 : 0;
-    let yn = Math.abs(cell1.y - cell2.y) < r + 1 ? 1 : 0;
-    let zn = Math.abs(cell1.z - cell2.z) < r + 1 ? 1 : 0;
-    return xn + yn + zn > 1 && xn + yn + zn != 2 && xn + yn + zn != 0;
+    return false;
   }
 
   function handleRangeChange(
@@ -341,6 +339,15 @@
   }
 
   async function handleRightClick(e: MouseEvent) {
+    console.log('right click');
+    if(selected && selected.occupant && dragElement){
+      dragElement.dispatchEvent(new DragEvent('dragend', {
+        bubbles: true, 
+        cancelable: true, 
+        clientX: 0,
+        clientY: 0,
+      }))
+    }
     e.preventDefault();
   }
 
@@ -355,6 +362,7 @@
     if (e && e.dataTransfer) {
       e.dataTransfer.setData("text/plain", "Draggable");
       e.dataTransfer.setDragImage(document.createElement("img"), 0, 0);
+      dragElement = e.currentTarget;
     }
   }
 
@@ -364,7 +372,7 @@
     }
   ) {
     selected = null;
-
+    dragElement = null;
     //e.preventDefault();
   }
 
@@ -469,7 +477,7 @@
     let zn = Math.abs(start.z - end.z);
     let tot = Math.max(xn, yn, zn);
     console.log(xn, yn, zn, tot);
-    return tot - 1;
+    return 2**tot - 2;
   }
 
   let battling = $state(false);
