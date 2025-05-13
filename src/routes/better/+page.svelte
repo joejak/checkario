@@ -1,9 +1,11 @@
 <script lang="ts">
   import { betterCCB, type Space, type Team } from "$lib/constan";
   import { onMount } from "svelte";
+  import { io } from "socket.io-client";
+
+  const socket = io();
 
   let showDebugInfo = $state(false);
-
   const minScalar = 50;
 
   let board = $state(betterCCB());
@@ -131,6 +133,14 @@
     }
 
     resize();
+
+    socket.on("connection", (socket) => {
+      console.log("socket connected");
+    });
+
+    socket.on("game-action", (data) => {
+      console.log("incoming data:", data);
+    });
   });
 
   function resetBoard(numPlayers: number) {
@@ -339,14 +349,16 @@
   }
 
   async function handleRightClick(e: MouseEvent) {
-    console.log('right click');
-    if(selected && selected.occupant && dragElement){
-      dragElement.dispatchEvent(new DragEvent('dragend', {
-        bubbles: true, 
-        cancelable: true, 
-        clientX: 0,
-        clientY: 0,
-      }))
+    console.log("right click");
+    if (selected && selected.occupant && dragElement) {
+      dragElement.dispatchEvent(
+        new DragEvent("dragend", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 0,
+          clientY: 0,
+        })
+      );
     }
     e.preventDefault();
   }
@@ -421,6 +433,10 @@
 
   let pieceMoved = $state(false);
 
+  async function broadCastUpdateSpace(space: Space) {
+    socket.emit("game-action", space);
+  }
+
   async function handleDropEvent(e: DragEvent, cell: Space) {
     if (selected && selected.occupant) {
       selected.occupant.moved = true;
@@ -435,6 +451,8 @@
           selected.occupant.strength += cell.occupant.strength;
           cell.occupant = selected.occupant;
           selected.occupant = null;
+          broadCastUpdateSpace(selected);
+          broadCastUpdateSpace(cell);
           return;
         } else {
           //enemy take
@@ -443,13 +461,17 @@
             selected.occupant.strength -= cell.occupant.strength;
             cell.occupant = selected.occupant;
             selected.occupant = null;
+            broadCastUpdateSpace(selected);
+            broadCastUpdateSpace(cell);
             return;
           } else {
             //enemy is stronger
             cell.occupant.strength -= selected.occupant.strength;
             selected.occupant = null;
+            broadCastUpdateSpace(selected);
             if (cell.occupant.strength < 1) {
               cell.occupant = null;
+              broadCastUpdateSpace(cell);
             }
             nextTurn();
           }
@@ -461,10 +483,14 @@
         selected.occupant.strength += cell.occupant.strength;
         cell.occupant = selected.occupant;
         selected.occupant = null;
+        broadCastUpdateSpace(selected);
+        broadCastUpdateSpace(cell);
         return;
       } else {
         cell.occupant = selected.occupant;
         selected.occupant = null;
+        broadCastUpdateSpace(selected);
+        broadCastUpdateSpace(cell);
       }
 
       nextTurn();
@@ -477,12 +503,16 @@
     let zn = Math.abs(start.z - end.z);
     let tot = Math.max(xn, yn, zn);
     console.log(xn, yn, zn, tot);
-    return 2**tot - 2;
+    return 2 ** tot - 2;
   }
 
   let battling = $state(false);
 
   let showSettings = $state(false);
+
+  async function ping() {
+    socket.emit("game-action", "ping");
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -598,6 +628,13 @@
         }}
       >
         Reset
+      </button>
+      <button
+        onclick={() => {
+          ping();
+        }}
+      >
+        Ping
       </button>
     </div>
   </fieldset>
@@ -875,7 +912,7 @@
               handleDragEnd(e);
             }}
           >
-            {cell.occupant.strength}
+            <p style="margin: 0px; padding: 0px;">{cell.occupant.strength}</p>
           </div>
         {/if}
         {#if showDebugInfo}
